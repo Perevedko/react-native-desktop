@@ -136,4 +136,27 @@ private:
     QScopedPointer<BridgePrivate> d_ptr;
 };
 
+#include <QWebEnginePage>
+
+class CustomWebPage : public QWebEnginePage {
+public:
+    CustomWebPage(QWebEngineProfile* profile, QObject* parent) : QWebEnginePage(profile, parent) {}
+
+    static CustomWebPage* instance();
+
+protected:
+    void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString& message, int lineNumber, const QString& sourceID) override;
+
+    bool javaScriptConfirm(const QUrl &securityOrigin, const QString &msg) override {
+        qDebug() << "!!! Security javaScriptConfirm: " << securityOrigin << " msg: " << msg;
+        return true;
+    }
+
+    bool javaScriptPrompt(const QUrl &securityOrigin, const QString &msg, const QString &defaultValue, QString *result) override {
+        qDebug() << "!!! Security javaScriptPrompt: " << securityOrigin << " msg: " << msg;
+        return true;
+    }
+
+};
+
 #endif // BRIDGE_H

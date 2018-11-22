@@ -204,14 +204,14 @@ void Bridge::setupExecutor() {
     }
 
     connect(d->executor, SIGNAL(applicationScriptDone()), SLOT(applicationScriptDone()));
-    QMetaObject::invokeMethod(d_func()->executor, "init", Qt::AutoConnection);
+    QMetaObject::invokeMethod(d_func()->executor, "init", Qt::DirectConnection);
 }
 
 void Bridge::resetExecutor() {
     Q_D(Bridge);
 
     if (d->executor) {
-        QMetaObject::invokeMethod(d_func()->executor, "resetConnection", Qt::AutoConnection);
+        QMetaObject::invokeMethod(d_func()->executor, "resetConnection", Qt::DirectConnection);
         d->executor->deleteLater();
         d->executor = nullptr;
         d->useJSC = false;
@@ -266,7 +266,7 @@ void Bridge::enqueueJSCall(const QString& module, const QString& method, const Q
     QMetaObject::invokeMethod(
         d_func()->executor,
         "executeJSCall",
-        Qt::AutoConnection,
+        Qt::DirectConnection,
         Q_ARG(const QString&, "callFunctionReturnFlushedQueue"),
         Q_ARG(const QVariantList&, list),
         Q_ARG(const Executor::ExecuteCallback&, [=](const QJsonDocument& doc) { processResult(doc); }));
@@ -279,7 +279,7 @@ void Bridge::invokePromiseCallback(double callbackCode, const QVariantList& args
     QMetaObject::invokeMethod(
         d_func()->executor,
         "executeJSCall",
-        Qt::AutoConnection,
+        Qt::DirectConnection,
         Q_ARG(const QString&, "invokeCallbackAndReturnFlushedQueue"),
         Q_ARG(const QVariantList&, list),
         Q_ARG(const Executor::ExecuteCallback&, [=](const QJsonDocument& doc) { processResult(doc); }));
@@ -291,7 +291,7 @@ void Bridge::invokeAndProcess(const QString& method, const QVariantList& args) {
     QMetaObject::invokeMethod(
         d_func()->executor,
         "executeJSCall",
-        Qt::AutoConnection,
+        Qt::DirectConnection,
         Q_ARG(const QString&, method),
         Q_ARG(const QVariantList&, args),
         Q_ARG(const Executor::ExecuteCallback&, [=](const QJsonDocument& doc) { processResult(doc); }));
@@ -308,7 +308,7 @@ void Bridge::enqueueRunAppCall(const QVariantList& args) {
     QVariantList list = QVariantList{"AppRegistry", "runApplication", args};
     QMetaObject::invokeMethod(d_func()->executor,
                               "executeJSCall",
-                              Qt::AutoConnection,
+                              Qt::DirectConnection,
                               Q_ARG(QString, "callFunctionReturnFlushedQueue"),
                               Q_ARG(QVariantList, list),
                               Q_ARG(Executor::ExecuteCallback, [=](const QJsonDocument& doc) {
@@ -648,7 +648,7 @@ void Bridge::applicationScriptDone() {
     QTimer::singleShot(0, [this]() {
         QMetaObject::invokeMethod(d_func()->executor,
                                   "executeJSCall",
-                                  Qt::AutoConnection,
+                                  Qt::DirectConnection,
                                   Q_ARG(const QString&, "flushedQueue"),
                                   Q_ARG(const QVariantList&, QVariantList()),
                                   Q_ARG(const Executor::ExecuteCallback&, [=](const QJsonDocument& doc) {

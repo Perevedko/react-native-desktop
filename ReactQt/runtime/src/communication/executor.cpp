@@ -12,14 +12,24 @@
  */
 
 #include "executor.h"
+#include "bridge.h"
+
 #include <QJsonDocument>
 #include <QSharedPointer>
+
+#include <QStandardPaths>
 
 #include <QWebEngineView>
 #include <QWebEngineProfile>
 #include <QWebEnginePage>
 #include <QWebEngineScript>
 #include <QWebEngineScriptCollection>
+#include <QWebEngineSettings>
+
+#include <QNetworkProxy>
+
+#include <QWebChannel>
+#include <QFile>
 
 class ExecutorPrivate : public QObject {
 public:
@@ -47,19 +57,32 @@ public:
     Executor* q_ptr = nullptr;
 };
 
-class CustomWebPage : public QWebEnginePage {
-public:
-    CustomWebPage(QObject* parent) : QWebEnginePage(parent) {}
-
-protected:
-    void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString& message, int lineNumber, const QString& sourceID) override {
-        qDebug() << "New message received: " << message;
-    }
-
-};
-
 static QWebEngineView *webEngine = nullptr;
 static CustomWebPage *myPage = nullptr;
+
+CustomWebPage* CustomWebPage::instance() {
+    return myPage;
+}
+
+void CustomWebPage::javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString& message, int lineNumber, const QString& sourceID) {
+    qDebug() << "New message received: " << message << " level: " << level <<" lineNumber: " << lineNumber << " sourceID: " << sourceID;
+    if (level == QWebEnginePage::ErrorMessageLevel || message.contains("SecurityError")) {
+        qDebug() << "Saving to file...";
+        myPage->save("errorHTML.txt");
+    }
+}
+
+#include <QDir>
+#include <QEventLoop>
+
+QString tmpDirPath()
+    {
+        static QString tmpd = QDir::tempPath() + "/tst_qwebenginepage-"
+            + QDateTime::currentDateTime().toString(QLatin1String("yyyyMMddhhmmss"));
+        return tmpd;
+}
+
+
 
 Executor::Executor(ServerConnection* conn, QObject* parent) : IExecutor(parent), d_ptr(new ExecutorPrivate(this)) {
     Q_ASSERT(conn);
@@ -68,10 +91,142 @@ Executor::Executor(ServerConnection* conn, QObject* parent) : IExecutor(parent),
     connect(d->connection(), &ServerConnection::dataReady, d, &ExecutorPrivate::readReply);
 
     qRegisterMetaType<Executor::ExecuteCallback>();
+    qRegisterMetaType<QNetworkProxy>("QNetworkProxy");
+    qRegisterMetaType<QAbstractSocket::SocketError>();
 
     webEngine = new QWebEngineView();
-    myPage = new CustomWebPage(webEngine);
-    webEngine->setPage(myPage);
+
+    /*webEngine->settings()->setAttribute(QWebEngineSettings::WebGLEnabled, true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::PluginsEnabled, true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::JavascriptCanAccessClipboard, true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::LocalStorageEnabled, true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::AutoLoadImages,true);
+
+    webEngine->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls,true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::XSSAuditingEnabled,true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::SpatialNavigationEnabled,true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls,true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::HyperlinkAuditingEnabled,true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled,true);
+
+    webEngine->settings()->setAttribute(QWebEngineSettings::AllowRunningInsecureContent,true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::AllowWindowActivationFromJavaScript,true);
+    webEngine->settings()->setAttribute(QWebEngineSettings::JavascriptCanPaste,true);*/
+
+
+
+    auto path = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    qDebug() << "setPersistentStoragePath: " << path;
+
+    auto *profile = new QWebEngineProfile("StatusReactProfile", webEngine);
+
+    QDir storageDir(path);
+    storageDir.mkdir("WebEngineTest1s");
+
+    profile->settings()->setAttribute(QWebEngineSettings::LocalStorageEnabled, true);
+    profile->setPersistentStoragePath(path + "/WebEngineTest1s");
+    profile->setCachePath(path + "/WebEngineTest1s");
+
+    /*profile->settings()->setAttribute(QWebEngineSettings::WebGLEnabled, true);
+    profile->settings()->setAttribute(QWebEngineSettings::PluginsEnabled, true);
+    profile->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, true);
+    profile->settings()->setAttribute(QWebEngineSettings::JavascriptCanAccessClipboard, true);
+    profile->settings()->setAttribute(QWebEngineSettings::LocalStorageEnabled, true);
+    profile->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+    profile->settings()->setAttribute(QWebEngineSettings::AutoLoadImages,true);
+
+    profile->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls,true);
+    profile->settings()->setAttribute(QWebEngineSettings::XSSAuditingEnabled,true);
+    profile->settings()->setAttribute(QWebEngineSettings::SpatialNavigationEnabled,true);
+    profile->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls,true);
+    profile->settings()->setAttribute(QWebEngineSettings::HyperlinkAuditingEnabled,true);
+    profile->settings()->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled,true);
+
+    profile->settings()->setAttribute(QWebEngineSettings::AllowRunningInsecureContent,true);
+    profile->settings()->setAttribute(QWebEngineSettings::AllowWindowActivationFromJavaScript,true);
+    profile->settings()->setAttribute(QWebEngineSettings::JavascriptCanPaste,true);*/
+
+    //profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+    //profile->settings()->setAttribute()
+
+    QFile webChannelJsFile(":/qtwebchannel/qwebchannel.js");
+    if(!webChannelJsFile.open(QIODevice::ReadOnly) )
+    {
+        //qFatal( QString("Couldn't open qwebchannel.js file: %1").arg(webChannelJsFile.errorString()) );
+    }
+    else
+    {
+        QByteArray webChannelJs = webChannelJsFile.readAll();
+        /*webChannelJs.append(
+                 "\n"
+                 "console.log('!!!! Test message');\n"
+                 "new QWebChannel(qt.webChannelTransport, function(channel) {"
+                 "   console.log('!!! new QWebChannel is created');"
+                 "   var JSobject = channel.objects.RealmTest;"
+                 "   console.log('Custom JSObject= ' + JSobject);"
+                 "});"
+        );*/
+
+        QWebEngineScript script;
+            script.setSourceCode(webChannelJs);
+            script.setName("qwebchannel.js");
+            script.setWorldId(QWebEngineScript::MainWorld);
+            script.setInjectionPoint(QWebEngineScript::DocumentCreation);
+            script.setRunsOnSubFrames(false);
+        profile->scripts()->insert(script);
+    }
+
+    myPage = new CustomWebPage(profile, webEngine);
+
+    QWebChannel* channel = new QWebChannel(this);
+    myPage->setWebChannel(channel);
+
+    RealmClass* realmInstance = new RealmClass(this);
+
+    channel->registerObject(QStringLiteral("RealmTest"), realmInstance);
+
+    QEventLoop* eventLoop = new QEventLoop();
+
+
+
+    /*QFile apiFile(":/qtwebchannel/qwebchannel.js");
+    if(!apiFile.open(QIODevice::ReadOnly))
+        qDebug()<<"Couldn't load Qt's QWebChannel API!";
+    QString apiScript = QString::fromLatin1(apiFile.readAll());
+    myPage->runJavaScript(apiScript, 0);*/
+
+    connect(myPage, &QWebEnginePage::loadFinished, this, [=](bool finished) {
+        qDebug() << "!!! load finished with result: " << finished;
+        eventLoop->exit();
+    });
+
+    myPage->setHtml(QString("<html> <head>\n"
+                            "         <script type=\"text/javascript\">\n"
+                            "           window.onload = function() {\n"
+                            "               console.log('! ! ! ! Test message');\n"
+                            "               new QWebChannel(qt.webChannelTransport, function(channel) { \n"
+                            "               console.log('!!! new QWebChannel is created');\n"
+                            "               window.Realm = channel.objects.RealmTest;\n"
+                            "               console.log('Custom JSObject= ' + window.Realm);\n"
+                            "           }\n);"
+                            "          }\n"
+                            "         </script>\n"
+                            "       </head>\n"
+                            "       <body> </body> </html>"
+                            ), QUrl("http://wwww.example.com"));
+    eventLoop->exec();
+
+    //myPage->setUrl(QUrl("http://google.com"));
+
+
+    //myPage->load(QUrl("http://google.com"));
+
+    //myPage->setHtml("<html><header><title>This is title</title></header><body>Hello world</body></html>");
+
+    //webEngine->setPage(myPage);
+    //
 }
 
 Executor::~Executor() {
@@ -102,7 +257,7 @@ void Executor::injectJson(const QString& name, const QVariant& data) {
     QJsonDocument doc = QJsonDocument::fromVariant(data);
     //d_ptr->processRequest(name.toLocal8Bit() + "=" + doc.toJson(QJsonDocument::Compact) + ";");
 
-    myPage->runJavaScript(name.toLocal8Bit() + "=" + doc.toJson(QJsonDocument::Compact) + ";", [](const QVariant &v) {
+    myPage->runJavaScript(name.toLocal8Bit() + "=" + doc.toJson(QJsonDocument::Compact) + ";", 0, [](const QVariant &v) {
         qDebug() << "Result of runJavaScript: ";
         if (v.isValid()) {
             qDebug() << v;
@@ -126,12 +281,13 @@ void Executor::executeApplicationScript(const QByteArray& script, const QUrl& /*
 
     //myPage = new QWebEnginePage(webEngine);
     //webEngine->setPage(myPage);
-    myPage->runJavaScript("console.log(\"Test msg!!!!\");");
-    myPage->runJavaScript(script, [=](const QVariant &v) {
+    myPage->runJavaScript("console.log(\"Test msg!!!!\");", 0);
+    myPage->runJavaScript(script, 0, [=](const QVariant &v) {
         qDebug() << "Result of runJavaScript:";
         if (v.isValid()) {
             qDebug() << v;
         }
+        qDebug() << "Emitting applicationScriptDone...";
         Q_EMIT applicationScriptDone();
     });
 }
@@ -153,7 +309,7 @@ void Executor::executeJSCall(const QString& method,
     //d_ptr->processRequest(
         //QByteArray("__fbBatchedBridge.") + method.toLocal8Bit() + "(" + stringifiedArgs.join(',') + ");", callback);
 
-    myPage->runJavaScript(QByteArray("__fbBatchedBridge.") + method.toLocal8Bit() + "(" + stringifiedArgs.join(',') + ");", [=](const QVariant &v) {
+    myPage->runJavaScript(QByteArray("__fbBatchedBridge.") + method.toLocal8Bit() + "(" + stringifiedArgs.join(',') + ");", 0, [=](const QVariant &v) {
         qDebug() << "Result of runJavaScript: ";
         if (v.isValid()) {
             qDebug() << v;
